@@ -69,8 +69,10 @@ def skorlari_hesapla():
     # MNA
     mna_val = int(st.session_state.mna_a[0]) + int(st.session_state.mna_b[0]) + int(st.session_state.mna_c[0]) + int(st.session_state.mna_d[0]) + int(st.session_state.mna_e[0]) + int(st.session_state.mna_f[0])
     
-    # FRAIL (Sondaki parantez içindeki sayıyı alır)
-    def parse_score(val): return float(val.split("(")[1].split(")")[0])
+    # SORUNU ÇÖZEN SATIR: [-1] kullanılarak stringin içindeki son parantez alınıyor.
+    def parse_score(val): return float(str(val).split("(")[-1].split(")")[0])
+    
+    # FRAIL
     frail_val = parse_score(st.session_state.frail_1) + parse_score(st.session_state.frail_2) + parse_score(st.session_state.frail_3) + parse_score(st.session_state.frail_4) + parse_score(st.session_state.frail_5)
 
     # TSFI Hasta & Yakın
@@ -282,7 +284,6 @@ if st.session_state.hasta_verileri:
         cols = ['tc_kimlik'] + [c for c in df.columns if c != 'tc_kimlik']
         df = df[cols]
     
-    # st.data_editor ile düzenlenebilir/silinebilir dinamik tablo (Streamlit'in mucizesi)
     edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="veri_editoru")
     
     col_dl1, col_dl2 = st.columns(2)
@@ -292,7 +293,7 @@ if st.session_state.hasta_verileri:
             for index, row in edited_df.iterrows():
                 yeni_veritabani[row['tc_kimlik']] = row.to_dict()
             st.session_state.hasta_verileri = yeni_veritabani
-            st.success("Tablodaki güncellemelerin sisteme yansıtıldı!")
+            st.success("Tablodaki güncellemeler sisteme yansıtıldı!")
             st.rerun()
             
     with col_dl2:
