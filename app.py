@@ -1,211 +1,186 @@
 import streamlit as st
 import pandas as pd
-import io
 
-# Sayfa Yapılandırması
-st.set_page_config(page_title="CRF - TSFI & Diyafram USG", layout="wide")
-st.title("OLGU RAPOR FORMU (CRF) - TSFI Validasyonu ve Diyafram USG")
+# --- SAYFA AYARLARI ---
+st.set_page_config(page_title="Acil Klinik Formu", layout="wide")
 
-# Veritabanı (Session State) başlatma
-if 'hasta_verileri' not in st.session_state:
-    st.session_state['hasta_verileri'] = []
+# --- SİHİRBAZ (WIZARD) ALTYAPISI ---
+# Uygulamanın hangi adımda (sekmede) olduğunu hafızada tutarız
+if 'step' not in st.session_state:
+    st.session_state.step = 1
 
-# --- 1. Hasta Kimlik ve Demografik Bilgileri ---
-st.header("1. Hasta Kimlik ve Demografik Bilgileri")
-col1, col2 = st.columns(2)
-with col1:
-    barkod = st.text_input("BARKOD / ÇALIŞMA NO")
-    isim_soyisim = st.text_input("İsim Soyisim")
-    tc_kimlik = st.text_input("TC Kimlik No")
-with col2:
-    yas = st.number_input("Yaş (Yıl)", min_value=0, max_value=120, step=1)
-    cinsiyet = st.selectbox("Cinsiyet", ["Erkek", "Kadın", "Diğer"])
+def next_step():
+    if st.session_state.step < 10:
+        st.session_state.step += 1
 
-# --- 2. Yaralanma Özellikleri ve Vital Bulgular ---
-st.header("2. Yaralanma Özellikleri ve Vital Bulgular")
-col3, col4 = st.columns(2)
-with col3:
-    yaralanma_turu = st.selectbox("Yaralanma Türü", ["Künt", "Delici", "Diğer"])
-    yaralanma_mekanizmasi = st.selectbox("Yaralanma Mekanizması", ["Düşme", "Trafik Kazası", "Yüksekten Düşme", "Diğer"])
-with col4:
-    st.subheader("GKS ve Vital Bulgular")
-    gks_goz = st.number_input("GKS - Göz", min_value=1, max_value=4, value=4)
-    gks_motor = st.number_input("GKS - Motor", min_value=1, max_value=6, value=6)
-    gks_sozel = st.number_input("GKS - Sözel", min_value=1, max_value=5, value=5)
-    gks_toplam = gks_goz + gks_motor + gks_sozel
-    st.info(f"**Toplam GKS:** {gks_toplam}")
+def prev_step():
+    if st.session_state.step > 1:
+        st.session_state.step -= 1
 
-col_v1, col_v2, col_v3, col_v4, col_v5 = st.columns(5)
-nabiz = col_v1.number_input("Nabız (/dk)", min_value=0)
-solunum = col_v2.number_input("Solunum (/dk)", min_value=0)
-ates = col_v3.number_input("Ateş (°C)", value=36.5, format="%.1f")
-map_degeri = col_v4.number_input("MAP (mmHg)", min_value=0)
-spo2 = col_v5.number_input("SpO2 (%)", min_value=0, max_value=100, value=98)
+# --- ÜST BİLGİ VE İLERLEME ÇUBUĞU ---
+st.title("⚕️ Acil Servis Klinik Veri Giriş Formu")
+st.progress(st.session_state.step / 10)
 
-# --- 3. Yaralanma Şiddeti Skoru (ISS) ---
-st.header("3. Yaralanma Şiddeti Skoru (ISS) Hesaplaması")
-st.write("Kural: En ciddi yaralanan 3 bölgenin AIS (1-6) puanlarının kareleri toplamı. AIS 6 varsa ISS direkt 75'tir.")
+# Yan yana sekme görünümü hissi vermek için adımları üstte gösterelim
+adımlar = ["1. Hasta", "2. Vitals", "3. Yaralanma", "4. ISS", "5. Lab", 
+           "6. Sağ USG", "7. EASIX", "8. Görüntüleme", "9. Tedavi", "10. Sonuç"]
+st.caption(f"**Mevcut Aşama:** {adımlar[st.session_state.step - 1]} ({st.session_state.step}/10)")
+st.divider()
 
-ais_options = [0, 1, 2, 3, 4, 5, 6]
-col_ais1, col_ais2 = st.columns(2)
-with col_ais1:
-    ais_bas_boyun = st.selectbox("Baş ve Boyun AIS", ais_options)
-    ais_yuz = st.selectbox("Yüz AIS", ais_options)
-    ais_gogus = st.selectbox("Göğüs AIS", ais_options)
-with col_ais2:
-    ais_karin = st.selectbox("Karın veya Pelvik AIS", ais_options)
-    ais_ekstremite = st.selectbox("Ekstremiteler AIS", ais_options)
-    ais_dissal = st.selectbox("Dışsal AIS", ais_options)
+# ==========================================
+# ADIM 1: HASTA BİLGİLERİ (Barkod Çıkarıldı)
+# ==========================================
+if st.session_state.step == 1:
+    st.header("1. Hasta Demografik Bilgileri")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.number_input("Yaş", min_value=0, max_value=120, key="yas")
+    with col2:
+        st.selectbox("Cinsiyet", ["Erkek", "Kadın", "Belirtilmemiş"], key="cinsiyet")
 
-ais_listesi = [ais_bas_boyun, ais_yuz, ais_gogus, ais_karin, ais_ekstremite, ais_dissal]
-if 6 in ais_listesi:
-    iss_skoru = 75
-else:
-    ais_sirali = sorted(ais_listesi, reverse=True)
-    iss_skoru = sum([x**2 for x in ais_sirali[:3]])
-st.success(f"**Hesaplanan ISS Skoru:** {iss_skoru}")
-
-# --- 4. Diyafram USG Değerlendirmesi ---
-st.header("4. Diyafram USG Değerlendirmesi")
-col_usg1, col_usg2 = st.columns(2)
-with col_usg1:
-    st.subheader("Sağ Diyafram")
-    sag_ekskursiyon = st.number_input("Sağ Diyafragmatik Ekskürsiyon (cm)", min_value=0.0, format="%.2f")
-    sag_end_insp = st.number_input("Sağ Kalınlık - End-İnspiryum (cm)", min_value=0.0, format="%.2f")
-    sag_end_eksp = st.number_input("Sağ Kalınlık - End-Ekspiryum (cm)", min_value=0.0, format="%.2f")
-    sag_tf = st.number_input("Sağ Kalınlaşma Fraksiyonu (TF) (%)", min_value=0.0, format="%.1f")
-with col_usg2:
-    st.subheader("Sol Diyafram")
-    sol_ekskursiyon = st.number_input("Sol Diyafragmatik Ekskürsiyon (cm)", min_value=0.0, format="%.2f")
-    sol_end_insp = st.number_input("Sol Kalınlık - End-İnspiryum (cm)", min_value=0.0, format="%.2f")
-    sol_end_eksp = st.number_input("Sol Kalınlık - End-Ekspiryum (cm)", min_value=0.0, format="%.2f")
-    sol_tf = st.number_input("Sol Kalınlaşma Fraksiyonu (TF) (%)", min_value=0.0, format="%.1f")
-usg_diger = st.text_input("USG Diğer Bulgular")
-
-# --- 5. Charlson Comorbidity Index (CCI) ---
-st.header("5. Charlson Comorbidity Index (CCI)")
-cci_items = {
-    "Geçirilmiş Miyokard İnfarktüsü": 1, "Konjestif Kalp Yetmezliği": 1, "Periferik Vasküler Hastalık": 1,
-    "Serebrovasküler Hastalık": 1, "Demans": 1, "Kronik Akciğer Hastalığı": 1, "Romatolojik Hastalık": 1,
-    "Peptik Ülser Hastalığı": 1, "Hafif Karaciğer Hastalığı": 1, "Diyabet": 1,
-    "Hemipleji": 2, "Orta-Ağır Böbrek Hastalığı": 2, "Kronik Komplikasyonlu Diyabet": 2,
-    "Metastazsız Kanser": 2, "Lösemi": 2, "Lenfoma": 2,
-    "Orta-Ağır Karaciğer Hastalığı": 3,
-    "Metastatik Solid Tümör": 6, "AIDS": 6
-}
-cci_skor = 0
-cci_secimler = {}
-col_c1, col_c2, col_c3 = st.columns(3)
-for i, (hastalik, puan) in enumerate(cci_items.items()):
-    with [col_c1, col_c2, col_c3][i % 3]:
-        secili_mi = st.checkbox(f"{hastalik} ({puan} Puan)")
-        cci_secimler[hastalik] = secili_mi
-        if secili_mi:
-            cci_skor += puan
-st.success(f"**TOPLAM CCI SKORU:** {cci_skor}")
-
-# --- 6. MNA Tarama Formu ---
-st.header("6. Mini Nütrisyonel Değerlendirme (MNA)")
-mna_a = st.selectbox("A. Besin alımında azalma?", {"0: Şiddetli düşüş":0, "1: Orta derece düşüş":1, "2: Düşüş yok":2}.items(), format_func=lambda x: x[0])[1]
-mna_b = st.selectbox("B. Son 3 ay kilo kaybı?", {"0: >3 kg":0, "1: Bilinmiyor":1, "2: 1-3 kg arası":2, "3: Kilo kaybı yok":3}.items(), format_func=lambda x: x[0])[1]
-mna_c = st.selectbox("C. Hareketlilik?", {"0: Yatağa bağımlı":0, "1: Evden çıkamaz":1, "2: Evden çıkabilir":2}.items(), format_func=lambda x: x[0])[1]
-mna_d = st.selectbox("D. Psikolojik stres/akut hastalık?", {"0: Evet":0, "2: Hayır":2}.items(), format_func=lambda x: x[0])[1]
-mna_e = st.selectbox("E. Nöropsikolojik problemler?", {"0: Ciddi bunama":0, "1: Hafif bunama":1, "2: Problem yok":2}.items(), format_func=lambda x: x[0])[1]
-mna_f = st.selectbox("F. Vücut Kitle İndeksi (VKİ)?", {"0: <19":0, "1: 19-20.9":1, "2: 21-22.9":2, "3: ≥23":3}.items(), format_func=lambda x: x[0])[1]
-mna_skor = mna_a + mna_b + mna_c + mna_d + mna_e + mna_f
-st.success(f"**MNA TARAMA SKORU:** {mna_skor} / 14")
-
-# --- 7. FRAIL Ölçeği ---
-st.header("7. FRAIL Ölçeği")
-frail_1 = st.selectbox("Yorgunluk", {"Her zaman / Çoğu zaman":1, "Bazen / Çok az / Hiçbir zaman":0}.items(), format_func=lambda x: x[0])[1]
-frail_2 = st.selectbox("Direnç (Merdiven çıkma zorluğu)", {"Evet":1, "Hayır":0}.items(), format_func=lambda x: x[0])[1]
-frail_3 = st.selectbox("Dolaşma (Yürüme zorluğu)", {"Evet":1, "Hayır":0}.items(), format_func=lambda x: x[0])[1]
-frail_4 = st.selectbox("Hastalık (5 ve üzeri var mı?)", {"5-11 hastalık":1, "0-4 hastalık":0}.items(), format_func=lambda x: x[0])[1]
-frail_5 = st.selectbox("Kilo Kaybı (Son 1 yılda >= %5)", {"Evet (≥%5)":1, "Hayır (<%5)":0}.items(), format_func=lambda x: x[0])[1]
-frail_skor = frail_1 + frail_2 + frail_3 + frail_4 + frail_5
-st.success(f"**TOPLAM FRAIL SKORU:** {frail_skor} / 5")
-
-# --- TSFI HESAPLAMA FONKSİYONU ---
-def tsfi_hesapla(prefix):
-    st.subheader("Eşlik Eden Hastalıklar")
-    kanser = st.selectbox(f"Kanser ({prefix})", {"Yok (0)":0, "Evet (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_kanser")[1]
-    kah = st.selectbox(f"Koroner Arter ({prefix})", {"Yok (0)":0, "İlaç tedavisi (0.25)":0.25, "PCI (0.5)":0.5, "CABG (0.75)":0.75, "MI (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_kah")[1]
-    demans = st.selectbox(f"Demans ({prefix})", {"Yok (0)":0, "Hafif (0.25)":0.25, "Orta (0.5)":0.5, "Ağır (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_demans")[1]
+# ==========================================
+# ADIM 2: HAYATİ BULGULAR (MAP Hesaplama ve FiO2)
+# ==========================================
+elif st.session_state.step == 2:
+    st.header("2. Hayati Bulgular")
+    col1, col2 = st.columns(2)
     
-    st.subheader("Günlük Yaşam Aktiviteleri")
-    k_bakim = st.selectbox(f"Kişisel bakımda yardım ({prefix})", {"Hayır (0)":0, "Evet (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_kbakim")[1]
-    para = st.selectbox(f"Para yönetimi yardım ({prefix})", {"Hayır (0)":0, "Evet (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_para")[1]
-    ev_isi = st.selectbox(f"Ev işleri yardım ({prefix})", {"Hayır (0)":0, "Evet (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_evisi")[1]
-    tuvalet = st.selectbox(f"Tuvalet yardım ({prefix})", {"Hayır (0)":0, "Evet (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_tuvalet")[1]
-    yurume = st.selectbox(f"Yürürken yardım ({prefix})", {"Yok (0)":0, "Baston (0.75)":0.75, "Yürüteç (0.5)":0.5, "Tekerlekli sandalye (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_yurume")[1]
-    
-    st.subheader("Sağlık Tutumu (Kendini daha az...)")
-    tut_secenek = {"Hiçbir zaman (0)":0, "Bazen (0.5)":0.5, "Çoğu zaman (1)":1}
-    yararli = st.selectbox(f"Yararlı hissetme ({prefix})", tut_secenek.items(), format_func=lambda x: x[0], key=f"{prefix}_yararli")[1]
-    uzgun = st.selectbox(f"Üzgün hissetme ({prefix})", tut_secenek.items(), format_func=lambda x: x[0], key=f"{prefix}_uzgun")[1]
-    caba = st.selectbox(f"Çaba harcama ({prefix})", tut_secenek.items(), format_func=lambda x: x[0], key=f"{prefix}_caba")[1]
-    yalniz = st.selectbox(f"Yalnız hissetme ({prefix})", tut_secenek.items(), format_func=lambda x: x[0], key=f"{prefix}_yalniz")[1]
-    dusme = st.selectbox(f"Düşmeler ({prefix})", {"Yok (0)":0, "Var, son 1 ayda değil (0.5)":0.5, "Son 1 ayda (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_dusme")[1]
-    
-    st.subheader("Fonksiyon ve Beslenme")
-    cinsel = st.selectbox(f"Cinsel olarak aktif ({prefix})", {"Evet (0)":0, "Hayır (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_cinsel")[1]
-    albumin = st.selectbox(f"Albümin ({prefix})", {"≥3g/dl (0)":0, "<3g/dl (1)":1}.items(), format_func=lambda x: x[0], key=f"{prefix}_alb")[1]
-    
-    tsfi_toplam = sum([kanser, kah, demans, k_bakim, para, ev_isi, tuvalet, yurume, yararli, uzgun, caba, yalniz, dusme, cinsel, albumin])
-    frailty_indeks = tsfi_toplam / 15.0
-    durum = "Frail (>0.25)" if frailty_indeks > 0.25 else "Non-frail (≤0.25)"
-    
-    st.info(f"**{prefix} TSFI Skoru:** {tsfi_toplam} / 15  |  **İndeks:** {frailty_indeks:.2f}  |  **Durum:** {durum}")
-    return tsfi_toplam, frailty_indeks, durum
+    with col1:
+        sbp = st.number_input("Sistolik TA (mmHg)", min_value=0, max_value=300, value=120, key="sbp")
+        dbp = st.number_input("Diyastolik TA (mmHg)", min_value=0, max_value=200, value=80, key="dbp")
+        
+        # MAP Otomatik Hesaplama Formülü: (Sistolik + 2 * Diyastolik) / 3
+        map_val = (sbp + (2 * dbp)) / 3
+        st.info(f"**🧮 Hesaplanan MAP:** {map_val:.1f} mmHg")
 
-# --- 8 & 9. TSFI (Hasta ve Yakını) ---
-st.header("8 & 9. TSFI (Travma Spesifik Frailty İndeksi)")
-tab1, tab2 = st.tabs(["1. Ölçüm (Hasta - Kendisi)", "2. Ölçüm (Hasta Yakını)"])
-with tab1:
-    tsfi_hasta_skor, tsfi_hasta_indeks, tsfi_hasta_durum = tsfi_hesapla("HASTA")
-with tab2:
-    tsfi_yakini_skor, tsfi_yakini_indeks, tsfi_yakini_durum = tsfi_hesapla("YAKIN")
+    with col2:
+        st.number_input("Nabız (Atım/dk)", min_value=0, max_value=300, value=80, key="nabiz")
+        st.number_input("FiO2 (%)", min_value=21, max_value=100, value=21, step=1, key="fio2")
 
-# --- 10. Klinik Sonlanımlar ---
-st.header("10. Klinik Sonlanımlar")
-morbidite = st.selectbox("Morbidite (Komplikasyon) Gelişimi", ["Hayır", "Evet"])
-morbidite_turu = st.text_input("Morbidite Türü (Varsa)")
-taburculuk = st.selectbox("Taburculuk Durumu", ["Eve", "Servise", "Yoğun Bakıma", "Exitus"])
-
-# --- Veri Kaydetme ve Excel İndirme ---
-st.markdown("---")
-if st.button("💾 Hastayı Kaydet ve Verisetine Ekle", use_container_width=True):
-    yeni_kayit = {
-        "Barkod": barkod, "İsim Soyisim": isim_soyisim, "TC": tc_kimlik, "Yaş": yas, "Cinsiyet": cinsiyet,
-        "Yaralanma Türü": yaralanma_turu, "Mekanizma": yaralanma_mekanizmasi,
-        "GKS Toplam": gks_toplam, "Nabız": nabiz, "Solunum": solunum, "Ateş": ates, "MAP": map_degeri, "SpO2": spo2,
-        "ISS Skoru": iss_skoru,
-        "Sağ Ekskürsiyon": sag_ekskursiyon, "Sağ TF": sag_tf, "Sol Ekskürsiyon": sol_ekskursiyon, "Sol TF": sol_tf,
-        "CCI Skoru": cci_skor,
-        "MNA Skoru": mna_skor,
-        "FRAIL Skoru": frail_skor,
-        "TSFI Hasta Skoru": tsfi_hasta_skor, "TSFI Hasta İndeks": tsfi_hasta_indeks, "TSFI Hasta Durum": tsfi_hasta_durum,
-        "TSFI Yakını Skoru": tsfi_yakini_skor, "TSFI Yakını İndeks": tsfi_yakini_indeks, "TSFI Yakını Durum": tsfi_yakini_durum,
-        "Morbidite": morbidite, "Taburculuk": taburculuk
-    }
-    st.session_state['hasta_verileri'].append(yeni_kayit)
-    st.success(f"{isim_soyisim} isimli hastanın verileri başarıyla eklendi! Toplam hasta sayısı: {len(st.session_state['hasta_verileri'])}")
-
-# Kaydedilen Verileri Gösterme ve Excel Export
-if st.session_state['hasta_verileri']:
-    st.subheader("Kaydedilen Veriler Önizleme")
-    df = pd.DataFrame(st.session_state['hasta_verileri'])
-    st.dataframe(df)
-
-    # Excel'e çevirme işlemi (Hafızada)
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name="CRF_Verileri")
+# ==========================================
+# ADIM 3: YARALANMA TÜRÜ VE MEKANİZMASI
+# ==========================================
+elif st.session_state.step == 3:
+    st.header("3. Yaralanma Türü ve Mekanizması")
     
-    st.download_button(
-        label="📥 Tüm Verileri Excel Olarak İndir",
-        data=buffer.getvalue(),
-        file_name="TSFI_Calisma_Veriseti.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
+    # Yaralanma Türü
+    tur = st.selectbox("Yaralanma Türü", ["Künt", "Penetran", "Yanık", "Diğer"], key="y_tur")
+    if tur == "Diğer":
+        st.text_input("Lütfen 'Diğer' yaralanma türünü açıklayınız:", key="y_tur_diger")
+        
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Yaralanma Mekanizması
+    mekanizma = st.selectbox("Yaralanma Mekanizması", ["Araç İçi Trafik Kazası", "Araç Dışı Trafik Kazası", "Düşme", "Darp/Kesici Alet", "Diğer"], key="y_mek")
+    if mekanizma == "Diğer":
+        st.text_area("Lütfen 'Diğer' mekanizmayı detaylıca açıklayınız:", key="y_mek_diger")
+
+# ==========================================
+# ADIM 4: ISS PUANLAMASI VE AÇIKLAMALARI
+# ==========================================
+elif st.session_state.step == 4:
+    st.header("4. ISS (Injury Severity Score)")
+    
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        iss_score = st.number_input("ISS Puanını Giriniz", min_value=0, max_value=75, value=0, key="iss")
+    
+    with col2:
+        st.markdown("""
+        **📌 ISS Puanlama Rehberi:**
+        * **1 - 8 Puan:** Minör (Hafif) Yaralanma
+        * **9 - 15 Puan:** Orta Derece Yaralanma
+        * **16 - 24 Puan:** Ciddi (Ağır) Yaralanma
+        * **25 - 49 Puan:** Çok Ciddi Yaralanma
+        * **50 - 74 Puan:** Kritik (Hayatı Tehdit Eden) Yaralanma
+        * **75 Puan:** Ölümcül (Maksimum) Yaralanma
+        """)
+        
+        # Otomatik Uyarı Sistemi
+        if iss_score >= 16:
+            st.error("⚠️ Ciddi/Kritik Yaralanma Seviyesi!")
+        elif iss_score > 0:
+            st.success("✅ Minör/Orta Seviye")
+
+# ==========================================
+# ADIM 5: LABORATUVAR
+# ==========================================
+elif st.session_state.step == 5:
+    st.header("5. Temel Laboratuvar Değerleri")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.number_input("Laktat (mmol/L)", min_value=0.0, step=0.1, key="laktat")
+        st.number_input("Hemoglobin (g/dL)", min_value=0.0, step=0.1, key="hgb")
+    with col2:
+        st.number_input("WBC (10^3/µL)", min_value=0.0, step=0.1, key="wbc")
+        st.number_input("Trombosit (10^3/µL)", min_value=0.0, step=1.0, key="plt")
+
+# ==========================================
+# ADIM 6: SAĞ DİYAFRAGMA USG & DTF HESAPLAMA
+# ==========================================
+elif st.session_state.step == 6:
+    st.header("6. Sağ Diyafragma Ultrasonografisi")
+    st.caption("Not: Sol diyafragma ölçümü protokolden çıkarılmıştır.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        exp_kalinlik = st.number_input("Ekspiryum Sonu Kalınlık (mm)", min_value=0.1, value=1.5, step=0.1, key="exp_usg")
+    with col2:
+        insp_kalinlik = st.number_input("İnspiryum Sonu Kalınlık (mm)", min_value=0.1, value=2.0, step=0.1, key="insp_usg")
+        
+    # DTF Hesaplama Formülü: [(İnsp - Eksp) / Eksp] * 100
+    if exp_kalinlik > 0:
+        dtf = ((insp_kalinlik - exp_kalinlik) / exp_kalinlik) * 100
+        st.success(f"**🧮 Sağ Diyafragma Kalınlaşma Fraksiyonu (DTF):** % {dtf:.2f}")
+
+# ==========================================
+# ADIM 7: KLİNİK SKORLAR (EASIX vb.)
+# ==========================================
+elif st.session_state.step == 7:
+    st.header("7. Klinik Skorlamalar (EASIX)")
+    st.caption("EASIX Skoru = (LDH * Kreatinin) / Trombosit formülü üzerinden hesaplanır.")
+    st.text_input("EASIX Skoru (Hesaplanan/Gözlenen)", key="easix")
+
+# ==========================================
+# ADIM 8: GÖRÜNTÜLEME
+# ==========================================
+elif st.session_state.step == 8:
+    st.header("8. Teşhis ve Görüntüleme")
+    st.checkbox("Toraks BT Çekildi", key="toraks_bt")
+    st.checkbox("Batın BT Çekildi", key="batin_bt")
+    st.text_area("Görüntüleme Rapor Notları:", key="radyoloji_not")
+
+# ==========================================
+# ADIM 9: TEDAVİ VE MÜDAHALE
+# ==========================================
+elif st.session_state.step == 9:
+    st.header("9. Acil Servis Müdahaleleri")
+    st.multiselect("Uygulanan İşlemler", 
+                   ["Entübasyon", "Göğüs Tüpü", "Kan Transfüzyonu", "Vazopressör", "Cerrahi Konsültasyon"], 
+                   key="mudahaleler")
+
+# ==========================================
+# ADIM 10: SONUÇ VE KAYIT
+# ==========================================
+elif st.session_state.step == 10:
+    st.header("10. Sonuç ve Taburculuk")
+    st.selectbox("Klinik Sonuç", ["Servise Yatış", "Yoğun Bakıma (YBÜ) Yatış", "Taburcu", "Eksitus", "Sevk"], key="sonuc")
+    st.text_area("Eklemek İstediğiniz Klinik Notlar:", key="klinik_not")
+    
+    st.warning("Verileri Excel'e kaydetmeden önce tüm adımları kontrol ettiğinizden emin olun.")
+
+# --- ALT NAVİGASYON BUTONLARI ---
+st.divider()
+col_left, col_mid, col_right = st.columns([1, 8, 1])
+
+with col_left:
+    if st.session_state.step > 1:
+        st.button("⬅️ Geri", on_click=prev_step, use_container_width=True)
+
+with col_right:
+    if st.session_state.step < 10:
+        st.button("İleri ➡️", type="primary", on_click=next_step, use_container_width=True)
+    elif st.session_state.step == 10:
+        if st.button("💾 Kaydet", type="primary", use_container_width=True):
+            st.toast("Veriler başarıyla kaydedildi!", icon="✅")
+            st.balloons()
