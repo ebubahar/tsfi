@@ -6,13 +6,15 @@ import io
 st.set_page_config(page_title="CRF - Akıllı Veri Giriş Sistemi", layout="wide")
 
 # --- VERİ TABANI & HAFIZA (SESSION STATE) ANAHTARLARI ---
-# Formdaki her alanın varsayılan değeri. (Sıfırlama işlemlerinde kullanılır)
+# İstenilen varsayılan (default) değerler buraya tanımlandı
 KEYS = {
     'tc_kimlik': '', 'isim_soyisim': '', 'yas': 0, 'cinsiyet': 'Erkek',
     'yar_turu_secim': 'Künt', 'yar_turu_detay': '', 'yar_mek_secim': 'Düşme', 'yar_mek_detay': '',
+    # VİTAL VE GKS VARSAYILAN DEĞERLERİ
     'gks_goz': 4, 'gks_motor': 6, 'gks_sozel': 5,
     'sistolik': 120, 'diyastolik': 80, 'nabiz': 80, 'ates': 36.5,
     'solunum': 16, 'spo2': 98, 'fio2': 21,
+    # DİĞER VARSAYILANLAR
     'ais_bas': "0: Yok", 'ais_yuz': "0: Yok", 'ais_gogus': "0: Yok", 'ais_karin': "0: Yok", 'ais_ekstremite': "0: Yok", 'ais_dissal': "0: Yok",
     'sag_ekskursiyon': 0.0, 'sag_end_eksp': 0.20, 'sag_end_insp': 0.30, 'usg_diger': '',
     'cci_mi': False, 'cci_kky': False, 'cci_pvh': False, 'cci_svo': False, 'cci_demans': False, 'cci_koah': False,
@@ -26,13 +28,13 @@ KEYS = {
     'morbidite': 'Hayır', 'morbidite_turu': '', 'taburculuk': 'Eve'
 }
 
-# Başlangıç değişkenlerini Session State'e yükle
+# Başlangıç değişkenlerini Session State'e yükle (Sadece bir kere çalışır)
 for k, v in KEYS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 if 'hasta_verileri' not in st.session_state:
-    st.session_state['hasta_verileri'] = {} # Hızlı arama için TC kimliği anahtar yapıyoruz
+    st.session_state['hasta_verileri'] = {}
 if 'current_step' not in st.session_state:
     st.session_state['current_step'] = 0
 
@@ -40,15 +42,19 @@ if 'current_step' not in st.session_state:
 
 def tc_bulundu_doldur():
     """Kullanıcı TC yazdığında eski verileri çağırır"""
-    tc = st.session_state.tc_kimlik
+    tc = st.session_state.tc_kimlik_input # Input key'i farklı olmalı
+    st.session_state.tc_kimlik = tc
+    
     if tc in st.session_state.hasta_verileri:
         for k, v in st.session_state.hasta_verileri[tc].items():
             if k in KEYS:
                 st.session_state[k] = v
-        st.toast(f"✅ {tc} numaralı hastanın eski verileri yüklendi. Eksik kalanları tamamlayabilirsiniz!")
+        st.toast(f"✅ {tc} numaralı hastanın eski verileri yüklendi!")
 
 def skorlari_hesapla():
     """Tüm otomatik hesaplamaları yapar ve geriye sözlük döner"""
+    # GKS
+    gks_val = st.session_state.gks_goz + st.session_state.gks_motor + st.session_state.gks_sozel
     # MAP
     map_val = (st.session_state.sistolik + 2 * st.session_state.diyastolik) / 3
     # ROX
@@ -69,7 +75,7 @@ def skorlari_hesapla():
     # MNA
     mna_val = int(st.session_state.mna_a[0]) + int(st.session_state.mna_b[0]) + int(st.session_state.mna_c[0]) + int(st.session_state.mna_d[0]) + int(st.session_state.mna_e[0]) + int(st.session_state.mna_f[0])
     
-    # SORUNU ÇÖZEN SATIR: [-1] kullanılarak stringin içindeki son parantez alınıyor.
+    # FRAIL & TSFI Parser
     def parse_score(val): return float(str(val).split("(")[-1].split(")")[0])
     
     # FRAIL
@@ -79,21 +85,23 @@ def skorlari_hesapla():
     h_tsfi = sum([parse_score(st.session_state[k]) for k in ['h_kanser', 'h_kah', 'h_demans', 'h_kbakim', 'h_para', 'h_evisi', 'h_tuvalet', 'h_yurume', 'h_yararli', 'h_uzgun', 'h_caba', 'h_yalniz', 'h_dusme', 'h_cinsel', 'h_alb']])
     y_tsfi = sum([parse_score(st.session_state[k]) for k in ['y_kanser', 'y_kah', 'y_demans', 'y_kbakim', 'y_para', 'y_evisi', 'y_tuvalet', 'y_yurume', 'y_yararli', 'y_uzgun', 'y_caba', 'y_yalniz', 'y_dusme', 'y_cinsel', 'y_alb']])
 
-    return {"MAP": map_val, "ROX": rox_val, "DTF (%)": dtf_val, "ISS": iss_val, "CCI": cci_val, "MNA": mna_val, "FRAIL": frail_val, "TSFI (Hasta)": h_tsfi, "TSFI (Yakın)": y_tsfi}
+    return {"GKS_Toplam": gks_val, "MAP": map_val, "ROX": rox_val, "DTF (%)": dtf_val, "ISS": iss_val, "CCI": cci_val, "MNA": mna_val, "FRAIL": frail_val, "TSFI (Hasta)": h_tsfi, "TSFI (Yakın)": y_tsfi}
 
 def hastayi_kaydet(sessiz=False):
     """Mevcut durumu hesaplamaları yaparak veritabanına ekler"""
     tc = st.session_state.tc_kimlik
+    # Eğer sessiz kaydetme yapılıyorsa ve TC boşsa, hata verme, sadece sessizce işlemi iptal et.
     if not tc:
-        if not sessiz: st.warning("⚠️ Kaydetmek için önce TC Kimlik No girmelisiniz!")
+        if not sessiz: 
+            st.error("⚠️ Kaydetmek için önce 1. Sekmeden TC Kimlik No girmelisiniz!")
         return False
     
     hasta_satiri = {k: st.session_state[k] for k in KEYS.keys()}
     hesaplamalar = skorlari_hesapla()
-    hasta_satiri.update(hesaplamalar) # Otomatik skorları da excele geçmesi için ekle
+    hasta_satiri.update(hesaplamalar) 
     
     st.session_state.hasta_verileri[tc] = hasta_satiri
-    if not sessiz: st.toast("💾 Verileriniz başarıyla kaydedildi!")
+    if not sessiz: st.toast("💾 Verileriniz başarıyla veritabanına kaydedildi!")
     return True
 
 def yeni_hasta_baslat():
@@ -102,6 +110,7 @@ def yeni_hasta_baslat():
         hastayi_kaydet(sessiz=True)
     for k, v in KEYS.items():
         st.session_state[k] = v
+    st.session_state.tc_kimlik_input = '' # Input kutusunu da temizle
     st.session_state.current_step = 0
     st.rerun()
 
@@ -111,19 +120,22 @@ with col_top1:
     st.title("📑 CRF Veri Giriş Sistemi")
 with col_top2:
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("➕ YENİ HASTA Ekle / Temizle", use_container_width=True):
+    if st.button("➕ YENİ HASTA Ekle / Formu Temizle", use_container_width=True):
         yeni_hasta_baslat()
 
 # --- SEKMELER (NAVİGASYON) ---
-adimlar = ["1. Demografi", "2. Yaralanma & Vital", "3. ISS Skoru", "4. Diyafram USG", "5. CCI Skoru", "6. MNA Tarama", "7. FRAIL Ölçeği", "8. TSFI (Hasta)", "9. TSFI (Yakını)", "10. Sonuç"]
-st.session_state.current_step = adimlar.index(st.radio("Sekmeler:", adimlar, index=st.session_state.current_step, horizontal=True))
+adimlar = ["1. Demografi", "2. Yaralanma & Vital", "3. ISS", "4. USG", "5. CCI", "6. MNA", "7. FRAIL", "8. TSFI (H)", "9. TSFI (Y)", "10. Sonuç"]
+st.session_state.current_step = adimlar.index(st.radio("Sekmeler (İlerleme Durumu):", adimlar, index=st.session_state.current_step, horizontal=True))
 st.divider()
 
 # ====== SEKME İÇERİKLERİ ======
 
+# NOT: Tüm inputlarda değerlerin korunması için doğrudan key="degisken_adi" kullanıyoruz.
+# Böylece sekme değişse bile Streamlit otomatik olarak girilen değeri hatırlar.
+
 if st.session_state.current_step == 0:
     st.header("1. Kimlik ve Demografi")
-    st.text_input("TC Kimlik No (Yazınca eski veriler otomatik gelir)", key="tc_kimlik", on_change=tc_bulundu_doldur)
+    st.text_input("TC Kimlik No (Yazıp Enter'a basınca eski veriler yüklenir)", value=st.session_state.tc_kimlik, key="tc_kimlik_input", on_change=tc_bulundu_doldur)
     st.text_input("İsim Soyisim", key="isim_soyisim")
     c1, c2 = st.columns(2)
     c1.number_input("Yaş", min_value=0, max_value=120, key="yas")
@@ -139,24 +151,26 @@ elif st.session_state.current_step == 1:
         st.selectbox("Yaralanma Mekanizması", ["Düşme", "Trafik Kazası", "Yüksekten Düşme", "Diğer"], key="yar_mek_secim")
         if st.session_state.yar_mek_secim == "Diğer": st.text_input("Mekanizma diğer açıklaması", key="yar_mek_detay")
     
+    st.divider()
     st.subheader("Vital Bulgular")
+    # Değerler KEYS içindeki varsayılanlardan gelir, kullanıcı değiştirirse state güncellenir.
     v1, v2, v3, v4, v5, v6, v7 = st.columns(7)
     v1.number_input("Sistolik TA", min_value=0, key="sistolik")
     v2.number_input("Diyastolik", min_value=0, key="diyastolik")
     v3.number_input("Nabız", min_value=0, key="nabiz")
     v4.number_input("Solunum", min_value=1, key="solunum")
-    v5.number_input("Ateş", format="%.1f", key="ates")
+    v5.number_input("Ateş", format="%.1f", step=0.1, key="ates")
     v6.number_input("SpO2", min_value=0, max_value=100, key="spo2")
     v7.number_input("FiO2 (%)", min_value=21, max_value=100, key="fio2")
 
-    oto = skorlari_hesapla()
-    st.info(f"⚡ **Otomatik Hesaplamalar:** GKS ({st.session_state.gks_goz+st.session_state.gks_motor+st.session_state.gks_sozel}) | **MAP:** {oto['MAP']:.1f} mmHg | **ROX İndeksi:** {oto['ROX']:.2f}")
-    
-    st.subheader("GKS")
+    st.subheader("GKS (Glasgow Koma Skoru)")
     g1, g2, g3 = st.columns(3)
     g1.number_input("Göz", min_value=1, max_value=4, key="gks_goz")
     g2.number_input("Motor", min_value=1, max_value=6, key="gks_motor")
     g3.number_input("Sözel", min_value=1, max_value=5, key="gks_sozel")
+    
+    oto = skorlari_hesapla()
+    st.info(f"⚡ **Otomatik Hesaplamalar:** GKS Toplamı: **{oto['GKS_Toplam']}** | MAP: **{oto['MAP']:.1f} mmHg** | ROX İndeksi: **{oto['ROX']:.2f}**")
 
 elif st.session_state.current_step == 2:
     st.header("3. ISS (Yaralanma Şiddeti Skoru)")
@@ -173,9 +187,9 @@ elif st.session_state.current_step == 2:
 elif st.session_state.current_step == 3:
     st.header("4. Diyafram USG Değerlendirmesi (Sağ)")
     c1, c2, c3 = st.columns(3)
-    c1.number_input("Ekskürsiyon (cm)", min_value=0.0, format="%.2f", key="sag_ekskursiyon")
-    c2.number_input("End-Ekspiryum Kalınlık (cm)", min_value=0.01, format="%.2f", key="sag_end_eksp")
-    c3.number_input("End-İnspiryum Kalınlık (cm)", min_value=0.0, format="%.2f", key="sag_end_insp")
+    c1.number_input("Ekskürsiyon (cm)", min_value=0.0, format="%.2f", step=0.1, key="sag_ekskursiyon")
+    c2.number_input("End-Ekspiryum Kalınlık (cm)", min_value=0.01, format="%.2f", step=0.05, key="sag_end_eksp")
+    c3.number_input("End-İnspiryum Kalınlık (cm)", min_value=0.0, format="%.2f", step=0.05, key="sag_end_insp")
     st.text_area("Diğer USG Bulguları", key="usg_diger")
     st.success(f"**Otomatik Kalınlaşma Fraksiyonu (DTF):** %{skorlari_hesapla()['DTF (%)']:.1f}")
 
@@ -256,30 +270,30 @@ col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 with col_btn1:
     if st.session_state.current_step > 0:
         if st.button("⬅️ Önceki Sayfa", use_container_width=True):
-            hastayi_kaydet(sessiz=True) # Sayfa değişirken arkadan yedekle
+            hastayi_kaydet(sessiz=True) # Sekme değiştirirken arkada otomatik yedekle (TC yoksa hata vermez)
             st.session_state.current_step -= 1
             st.rerun()
 
 with col_btn2:
-    if st.button("💾 GÜNCEL SAYFAYI KAYDET", use_container_width=True):
-        hastayi_kaydet()
+    if st.button("💾 GÜNCEL VERİLERİ KAYDET", use_container_width=True):
+        hastayi_kaydet(sessiz=False)
 
 with col_btn3:
     if st.session_state.current_step < len(adimlar) - 1:
         if st.button("Sonraki Sayfa ➡️", use_container_width=True):
-            hastayi_kaydet(sessiz=True) # Sayfa değişirken arkadan yedekle
+            hastayi_kaydet(sessiz=True) # Sekme değiştirirken arkada otomatik yedekle
             st.session_state.current_step += 1
             st.rerun()
 
 # --- EXCEL VE VERİ YÖNETİMİ ALANI ---
 st.divider()
 st.header("🗂️ Kayıtlı Hastalar (Canlı Tablo Düzenleme)")
-st.write("Aşağıdaki tablo Excel mantığıyla çalışır. **Değerleri doğrudan üstüne tıklayıp değiştirebilir** veya **satırları silebilirsin**. İşlemin bitince aşağıdaki güncellemeyi kaydet butonuna basmayı unutma!")
+st.write("Aşağıdaki tablo Excel mantığıyla çalışır. Değerleri doğrudan değiştirip aşağıdaki 'Kaydet' butonuna basabilir veya satırları silebilirsiniz.")
 
 if st.session_state.hasta_verileri:
     df = pd.DataFrame(list(st.session_state.hasta_verileri.values()))
     
-    # TC Sütununu en başa alalım ki rahat görünsün
+    # TC Sütununu en başa alalım
     if 'tc_kimlik' in df.columns:
         cols = ['tc_kimlik'] + [c for c in df.columns if c != 'tc_kimlik']
         df = df[cols]
@@ -288,7 +302,7 @@ if st.session_state.hasta_verileri:
     
     col_dl1, col_dl2 = st.columns(2)
     with col_dl1:
-        if st.button("🔄 Tabloda Yaptığım Silme/Değişiklik İşlemlerini Sisteme Kaydet", use_container_width=True):
+        if st.button("🔄 Tablodaki Değişiklikleri Sisteme Kaydet", use_container_width=True):
             yeni_veritabani = {}
             for index, row in edited_df.iterrows():
                 yeni_veritabani[row['tc_kimlik']] = row.to_dict()
@@ -302,4 +316,4 @@ if st.session_state.hasta_verileri:
             edited_df.to_excel(writer, index=False, sheet_name="Tam_Veriseti")
         st.download_button("📥 Tabloyu EXCEL Olarak İndir", data=buffer.getvalue(), file_name="TSFI_Calisma_Veriseti.xlsx", use_container_width=True)
 else:
-    st.info("Sistemde henüz kaydedilmiş hasta bulunmuyor. Kayıt yaptıkça veriler burada Excel tablosu olarak belirecektir.")
+    st.info("Sistemde henüz kaydedilmiş hasta bulunmuyor. Kayıt yaptıkça veriler burada tablo olarak belirecektir.")
