@@ -3,11 +3,10 @@ import pandas as pd
 import io
 import gspread
 from google.oauth2.service_account import Credentials
+import json  # JSON kütüphanesini doğru yere, en tepeye ekledik!
 
 # --- GOOGLE SHEETS AYARLARI ---
-# 1. 'google_credentials.json' dosyasını bu Python koduyla aynı klasöre koymayı unutma.
-# 2. Aşağıdaki SHEET_ID kısmına Google E-Tablonun linkindeki uzun ID'yi yapıştır.
-SERVICE_ACCOUNT_FILE = 'google_credentials.json'
+# Aşağıdaki SHEET_ID kısmına Google E-Tablonun linkindeki uzun ID'yi yapıştır.
 SHEET_ID = '1uxRGNOZIMRYmVqP7se8BkohF5Lj_x7eKtS60cxSl76g' 
 
 # --- SAYFA YAPILANDIRMASI ---
@@ -44,17 +43,14 @@ if 'current_step' not in st.session_state:
 
 # --- GOOGLE SHEETS FONKSİYONLARI ---
 @st.cache_resource
-def import json # Bunu sayfanın en üstündeki importların arasına eklemiş olduğundan emin ol
-
-@st.cache_resource
 def get_gsheet_client():
     """Google Sheets API'ye Streamlit Secrets üzerinden güvenli bağlantı sağlar"""
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
-    # Şifreyi dosyadan değil, Streamlit'in güvenli kasasından çekiyoruz
+    # Şifreyi Streamlit'in güvenli kasasından çekiyoruz
     creds_dict = json.loads(st.secrets["google_json"])
     
-    # from_service_account_file YERİNE from_service_account_info kullanıyoruz
+    # from_service_account_info kullanarak sözlükten yetkilendirme yapıyoruz
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     return gspread.authorize(creds)
 
@@ -159,7 +155,7 @@ def hastayi_kaydet(sessiz=False):
         if not sessiz: st.success("💾 Verileriniz Google Sheets'e KALICI olarak kaydedildi!")
         return True
     except Exception as e:
-        st.error(f"❌ Google Sheets Kayıt Hatası: {e}")
+        st.error(f"❌ Google Sheets Kayıt Hatası: Lütfen Secrets alanını kontrol edin. Detay: {e}")
         return False
 
 def yeni_hasta_baslat():
@@ -275,7 +271,6 @@ elif st.session_state.current_step == 4:
     c1, c2, c3 = st.columns(3)
     for i, (label, h_key) in enumerate(hastaliklar):
         with [c1, c2, c3][i % 3]: 
-            # Sheets'ten 'TRUE'/'FALSE' stringi olarak geldiyse bool'a çevirme
             val = st.session_state[h_key]
             if isinstance(val, str): val = val.upper() == 'TRUE'
             st.session_state[h_key] = st.checkbox(label, value=val)
@@ -358,6 +353,3 @@ with col_btn3:
             hastayi_kaydet(sessiz=True) 
             st.session_state.current_step += 1
             st.rerun()
-
-# Alt kısımdaki canlı Excel görünümü Google Sheets üzerinden veri çektiğimiz için bu yapıda kaldırılmıştır.
-# Tüm verileriniz anında ve canlı olarak "SHEET_ID"sini verdiğiniz Google E-Tablonuzda görünecektir.
