@@ -1,20 +1,25 @@
 import streamlit as st
 import pandas as pd
 import io
+import gspread
+from google.oauth2.service_account import Credentials
+
+# --- GOOGLE SHEETS AYARLARI ---
+# 1. 'google_credentials.json' dosyasını bu Python koduyla aynı klasöre koymayı unutma.
+# 2. Aşağıdaki SHEET_ID kısmına Google E-Tablonun linkindeki uzun ID'yi yapıştır.
+SERVICE_ACCOUNT_FILE = 'google_credentials.json'
+SHEET_ID = '1uxRGNOZIMRYmVqP7se8BkohF5Lj_x7eKtS60cxSl76g' 
 
 # --- SAYFA YAPILANDIRMASI ---
-st.set_page_config(page_title="CRF - Akıllı Veri Giriş Sistemi", layout="wide")
+st.set_page_config(page_title="CRF - Bulut Senkronizasyonlu Sistem", layout="wide")
 
-# --- VERİ TABANI & HAFIZA (SESSION STATE) ANAHTARLARI ---
-# Tüm varsayılan değerleri tam istediğin gibi ayarladık.
+# --- VARSAYILAN DEĞERLER (KEYS) ---
 KEYS = {
     'tc_kimlik': '', 'isim_soyisim': '', 'yas': 0, 'cinsiyet': 'Erkek',
     'yar_turu_secim': 'Künt', 'yar_turu_detay': '', 'yar_mek_secim': 'Düşme', 'yar_mek_detay': '',
-    # VİTAL VE GKS VARSAYILAN DEĞERLERİ
     'gks_goz': 4, 'gks_motor': 6, 'gks_sozel': 5,
     'sistolik': 120, 'diyastolik': 80, 'nabiz': 80, 'ates': 36.5,
     'solunum': 16, 'spo2': 98, 'fio2': 21,
-    # DİĞER VARSAYILANLAR
     'ais_bas': "0: Yok", 'ais_yuz': "0: Yok", 'ais_gogus': "0: Yok", 'ais_karin': "0: Yok", 'ais_ekstremite': "0: Yok", 'ais_dissal': "0: Yok",
     'sag_ekskursiyon': 0.0, 'sag_end_eksp': 0.20, 'sag_end_insp': 0.30, 'usg_diger': '',
     'cci_mi': False, 'cci_kky': False, 'cci_pvh': False, 'cci_svo': False, 'cci_demans': False, 'cci_koah': False,
@@ -28,17 +33,85 @@ KEYS = {
     'morbidite': 'Hayır', 'morbidite_turu': '', 'taburculuk': 'Eve'
 }
 
-# Sistemi başlat
+# --- SİSTEM BAŞLATMA ---
 for k, v in KEYS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-if 'hasta_verileri' not in st.session_state:
-    st.session_state['hasta_verileri'] = {}
 if 'current_step' not in st.session_state:
     st.session_state['current_step'] = 0
 
-# --- SİSTEM FONKSİYONLARI ---
+
+# --- GOOGLE SHEETS FONKSİYONLARI ---
+@st.cache_resource
+def get_gsheet_client():
+    """Google Sheets API'ye güvenli bağlantı sağlar"""
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+    return gspread.authorize(creds)
+
+def veriyi_cek(tc_no):
+    """Buluttan TC ile hasta arar, bulursa ekrana çeker"""
+    if not tc_no: return False
+    try:
+        client = get_gsheet_client()
+        sh = client.open_by_key(SHEET_ID)
+        worksheet = sh.get_worksheet(0) # İlk sayfa (Sheet1)
+        
+        records = worksheet.get_all_records() # Tüm veriyi indir
+        for row in records:
+            # TC kimlik numarasını string olarak eşleştir
+            if str(row.get('tc_kimlik', '')) == str(tc_no):
+                # Bulunan hastanın verilerini hafızaya (Session State) yükle
+                for k in KEYS.keys():
+                    if k in row:
+                        st.session_state[k] = row[k]
+                return True # Veri başarıyla çekildi
+        return False # TC bulunamadı
+    except Exception as e:
+        st.error(f"⚠️ Buluttan veri çekerken bağlantı hatası oluştu. Lütfen JSON dosyasını ve İnternet bağlantınızı kontrol edin. Detay: {e}")
+        return False
+
+def veriyi_bul_veya_ekle(data_dict):
+    """Buluta veriyi yazar. Hasta varsa üstüne yazar, yoksa yeni satır açar"""
+    client = get_gsheet_client()
+    sh = client.open_by_key(SHEET_ID)
+    worksheet = sh.get_worksheet(0)
+    
+    # Eğer tablo tamamen boşsa önce başlıkları (Header) yaz
+    if worksheet.row_count == 0 or not worksheet.row_values(1):
+        worksheet.append_row(list(data_dict.keys()))
+        
+    records = worksheet.get_all_records()
+    df = pd.DataFrame(records)
+    
+    tc = str(data_dict['tc_kimlik'])
+    yeni_satir = list(data_dict.values())
+    
+    # Hasta daha önce kaydedilmiş mi kontrol et
+    if not df.empty and 'tc_kimlik' in df.columns and tc in df['tc_kimlik'].astype(str).values:
+        # Varsa ilgili satırı bul ve güncelle
+        idx = df[df['tc_kimlik'].astype(str) == tc].index[0] + 2 # Header ve 0-index kayması
+        worksheet.update(f"A{idx}", [yeni_satir])
+    else:
+        # Yoksa en alt satıra yeni kayıt olarak ekle
+        worksheet.append_row(yeni_satir)
+
+# --- TC KİMLİK DEĞİŞİM TETİKLEYİCİSİ ---
+def tc_degisti_kontrol():
+    """Kullanıcı TC yazıp Enter'a bastığında bu fonksiyon tetiklenir"""
+    yeni_tc = st.session_state.tc_kimlik_input
+    st.session_state.tc_kimlik = yeni_tc
+    
+    if yeni_tc:
+        st.toast("⏳ Google Sheets bulutunda aranıyor...")
+        bulundu_mu = veriyi_cek(yeni_tc)
+        if bulundu_mu:
+            st.toast("✅ CİHAZLAR ARASI SENKRONİZASYON BAŞARILI! Diğer cihazdan girilen veriler ekrana yüklendi.")
+        else:
+            st.toast("ℹ️ Bu TC'ye ait kayıt bulunamadı. Yeni bir kayıt oluşturuluyor.")
+
+# --- HESAPLAMA VE KAYDETME FONKSİYONLARI ---
 def skorlari_hesapla():
     gks_val = st.session_state.gks_goz + st.session_state.gks_motor + st.session_state.gks_sozel
     map_val = (st.session_state.sistolik + 2 * st.session_state.diyastolik) / 3
@@ -66,24 +139,31 @@ def skorlari_hesapla():
 def hastayi_kaydet(sessiz=False):
     tc = st.session_state.tc_kimlik
     if not tc:
-        if not sessiz: st.warning("⚠️ Kaydetmek için önce TC Kimlik No girmelisiniz!")
+        if not sessiz: st.warning("⚠️ Buluta kaydetmek için önce 1. Sekmeden TC Kimlik No girmelisiniz!")
         return False
     
     hasta_satiri = {k: st.session_state[k] for k in KEYS.keys()}
     hasta_satiri.update(skorlari_hesapla()) 
-    st.session_state.hasta_verileri[tc] = hasta_satiri
-    if not sessiz: st.toast("💾 Güncel veriler sisteme kaydedildi! (Ekranda kalmaya devam ediyor)")
-    return True
+    
+    try:
+        if not sessiz: st.info("☁️ Veriler Google Sheets bulutuna gönderiliyor...")
+        veriyi_bul_veya_ekle(hasta_satiri)
+        if not sessiz: st.success("💾 Verileriniz Google Sheets'e KALICI olarak kaydedildi!")
+        return True
+    except Exception as e:
+        st.error(f"❌ Google Sheets Kayıt Hatası: {e}")
+        return False
 
 def yeni_hasta_baslat():
+    # Mevcut ekrandakini buluta at ve ekranı sıfırla
     if st.session_state.tc_kimlik:
-        hastayi_kaydet(sessiz=True) # Ekranda kalan hastayı silmeden önce yedekle
+        hastayi_kaydet(sessiz=True) 
     for k, v in KEYS.items():
         st.session_state[k] = v
+    st.session_state.tc_kimlik_input = ''
     st.session_state.current_step = 0
     st.rerun()
 
-# Otomatik değer tutucu (Dropdown/Selectbox)
 def render_selectbox(label, options, state_key):
     idx = options.index(st.session_state[state_key]) if st.session_state[state_key] in options else 0
     st.session_state[state_key] = st.selectbox(label, options, index=idx)
@@ -91,39 +171,29 @@ def render_selectbox(label, options, state_key):
 # --- ÜST PANEL ---
 col_top1, col_top2 = st.columns([8, 2])
 with col_top1:
-    st.title("📑 CRF Veri Giriş Sistemi")
+    st.title("☁️ CRF Bulut Senkronizasyon Sistemi")
+    st.write("Cihazlar arası eşzamanlı çalışma aktif. Herhangi bir cihazdan TC girdiğinizde mevcut veriler otomatik çekilir.")
 with col_top2:
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("➕ YENİ HASTA (Formu Sıfırla)", use_container_width=True):
+    if st.button("➕ YENİ HASTA (Ekranı Sıfırla)", use_container_width=True):
         yeni_hasta_baslat()
 
 # --- SEKMELER & NAVİGASYON ---
 adimlar = ["1. Demografi", "2. Yaralanma & Vital", "3. ISS", "4. USG", "5. CCI", "6. MNA", "7. FRAIL", "8. TSFI (H)", "9. TSFI (Y)", "10. Sonuç"]
 new_step_name = st.radio("Sekmeler (İlerleme Durumu):", adimlar, index=st.session_state.current_step, horizontal=True)
 
-# Sekmeye manuel tıklandıysa otomatik kaydet ve oraya geç
 if adimlar.index(new_step_name) != st.session_state.current_step:
-    hastayi_kaydet(sessiz=True)
+    hastayi_kaydet(sessiz=True) # Sekme değiştikçe arkadan buluta at
     st.session_state.current_step = adimlar.index(new_step_name)
     st.rerun()
 st.divider()
 
-# ====== SEKME İÇERİKLERİ (Kalıcı Hafıza Mimarisi) ======
-# NOT: Artık her değer "value=st.session_state.xxx" formülüyle kalıcıdır.
+# ====== SEKME İÇERİKLERİ ======
 
 if st.session_state.current_step == 0:
     st.header("1. Kimlik ve Demografi")
-    # TC değiştiği an eski verileri çekme algoritması
-    yeni_tc = st.text_input("TC Kimlik No", value=st.session_state.tc_kimlik)
-    if yeni_tc != st.session_state.tc_kimlik:
-        st.session_state.tc_kimlik = yeni_tc
-        if yeni_tc in st.session_state.hasta_verileri:
-            for k, v in st.session_state.hasta_verileri[yeni_tc].items():
-                if k in KEYS:
-                    st.session_state[k] = v
-            st.toast("✅ Kayıtlı hasta bulundu! Eski değerler yüklendi.")
-        st.rerun()
-        
+    # TC değiştiğinde tc_degisti_kontrol fonsiyonu buluttan veriyi çeker!
+    st.text_input("TC Kimlik No (Yazıp Enter'a basın, diğer cihazdaki veriler çekilsin)", value=st.session_state.tc_kimlik, key="tc_kimlik_input", on_change=tc_degisti_kontrol)
     st.session_state.isim_soyisim = st.text_input("İsim Soyisim", value=st.session_state.isim_soyisim)
     c1, c2 = st.columns(2)
     st.session_state.yas = c1.number_input("Yaş", min_value=0, max_value=120, value=int(st.session_state.yas))
@@ -197,7 +267,10 @@ elif st.session_state.current_step == 4:
     c1, c2, c3 = st.columns(3)
     for i, (label, h_key) in enumerate(hastaliklar):
         with [c1, c2, c3][i % 3]: 
-            st.session_state[h_key] = st.checkbox(label, value=st.session_state[h_key])
+            # Sheets'ten 'TRUE'/'FALSE' stringi olarak geldiyse bool'a çevirme
+            val = st.session_state[h_key]
+            if isinstance(val, str): val = val.upper() == 'TRUE'
+            st.session_state[h_key] = st.checkbox(label, value=val)
     st.success(f"**Mevcut CCI Skoru:** {skorlari_hesapla()['CCI']}")
 
 elif st.session_state.current_step == 5:
@@ -263,49 +336,20 @@ col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 with col_btn1:
     if st.session_state.current_step > 0:
         if st.button("⬅️ Geri (Önceki Sayfa)", use_container_width=True):
-            hastayi_kaydet(sessiz=True) # Sekme değiştirirken arkada otomatik yedekle
+            hastayi_kaydet(sessiz=True) 
             st.session_state.current_step -= 1
             st.rerun()
 
 with col_btn2:
-    if st.button("💾 GÜNCEL VERİLERİ KAYDET", use_container_width=True):
+    if st.button("💾 GÜNCEL VERİLERİ GOOGLE SHEETS'E GÖNDER", use_container_width=True):
         hastayi_kaydet(sessiz=False)
 
 with col_btn3:
     if st.session_state.current_step < len(adimlar) - 1:
         if st.button("İleri (Sonraki Sayfa) ➡️", use_container_width=True):
-            hastayi_kaydet(sessiz=True) # Sekme değiştirirken arkada otomatik yedekle
+            hastayi_kaydet(sessiz=True) 
             st.session_state.current_step += 1
             st.rerun()
 
-# --- EXCEL VE VERİ YÖNETİMİ ALANI ---
-st.divider()
-st.header("🗂️ Kayıtlı Hastalar (Canlı Tablo Düzenleme)")
-st.write("Aşağıdaki tablo Excel mantığıyla çalışır. Değerleri doğrudan değiştirip aşağıdaki 'Kaydet' butonuna basabilir veya satırları silebilirsiniz.")
-
-if st.session_state.hasta_verileri:
-    df = pd.DataFrame(list(st.session_state.hasta_verileri.values()))
-    
-    if 'tc_kimlik' in df.columns:
-        cols = ['tc_kimlik'] + [c for c in df.columns if c != 'tc_kimlik']
-        df = df[cols]
-    
-    edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
-    
-    col_dl1, col_dl2 = st.columns(2)
-    with col_dl1:
-        if st.button("🔄 Tablodaki Değişiklikleri Sisteme Kaydet", use_container_width=True):
-            yeni_veritabani = {}
-            for index, row in edited_df.iterrows():
-                yeni_veritabani[row['tc_kimlik']] = row.to_dict()
-            st.session_state.hasta_verileri = yeni_veritabani
-            st.success("Tablodaki güncellemeler sisteme yansıtıldı!")
-            st.rerun()
-            
-    with col_dl2:
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            edited_df.to_excel(writer, index=False, sheet_name="Tam_Veriseti")
-        st.download_button("📥 Tabloyu EXCEL Olarak İndir", data=buffer.getvalue(), file_name="TSFI_Calisma_Veriseti.xlsx", use_container_width=True)
-else:
-    st.info("Sistemde henüz kaydedilmiş hasta bulunmuyor. Kayıt yaptıkça veriler burada tablo olarak belirecektir.")
+# Alt kısımdaki canlı Excel görünümü Google Sheets üzerinden veri çektiğimiz için bu yapıda kaldırılmıştır.
+# Tüm verileriniz anında ve canlı olarak "SHEET_ID"sini verdiğiniz Google E-Tablonuzda görünecektir.
