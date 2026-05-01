@@ -68,7 +68,8 @@ def get_gsheet_client():
             st.error(f"🛑 GİZLİ ANAHTAR BULUNAMADI!")
             st.write(f"**Lokalde aradığım tam yol:** `{json_path}`")
             st.write(f"**Lokal Hata:** `{e_local}`")
-            raise Exception("Kimlik doğrulama dosyası bulunamadığı için işlem durduruldu.")def veriyi_cek(tc_no):
+            raise Exception("Kimlik doğrulama dosyası bulunamadığı için işlem durduruldu.")
+def veriyi_cek(tc_no):
     """Buluttan TC ile hasta arar, bulursa ekrana çeker"""
     if not tc_no: return False
     try:
