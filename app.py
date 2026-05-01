@@ -44,16 +44,18 @@ if 'current_step' not in st.session_state:
 # --- GOOGLE SHEETS FONKSİYONLARI ---
 @st.cache_resource
 def get_gsheet_client():
-    """Google Sheets API'ye Streamlit Secrets üzerinden güvenli bağlantı sağlar"""
+    """Hem lokal dosyadan hem de bulut kasasından çalışabilen akıllı bağlantı"""
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
-    # Şifreyi Streamlit'in güvenli kasasından çekiyoruz
-    creds_dict = json.loads(st.secrets["google_json"])
-    
-    # from_service_account_info kullanarak sözlükten yetkilendirme yapıyoruz
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    try:
+        # Önce Streamlit Cloud kasasına (secrets) bakmayı dener (Bulut için)
+        creds_dict = json.loads(st.secrets["google_json"])
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    except (FileNotFoundError, KeyError):
+        # Eğer bulamazsa, senin bilgisayarındaki dosyaya bakar (Lokal için)
+        creds = Credentials.from_service_account_file('google_credentials.json', scopes=scopes)
+        
     return gspread.authorize(creds)
-
 def veriyi_cek(tc_no):
     """Buluttan TC ile hasta arar, bulursa ekrana çeker"""
     if not tc_no: return False
