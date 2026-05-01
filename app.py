@@ -1,3 +1,5 @@
+import json
+import os
 import streamlit as st
 import pandas as pd
 import io
@@ -44,19 +46,29 @@ if 'current_step' not in st.session_state:
 # --- GOOGLE SHEETS FONKSİYONLARI ---
 @st.cache_resource
 def get_gsheet_client():
-    """Hem lokal dosyadan hem de bulut kasasından çalışabilen akıllı bağlantı"""
+    """Dosya yolunu zorla tespit eden akıllı bağlantı"""
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     
+    # KODUN BULUNDUĞU TAM KLASÖRÜ BUL (Örn: C:\Users\ebuba\Desktop\ACİL TIP\tsfi_streamlit.io)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    json_path = os.path.join(current_dir, 'google_credentials.json')
+    
     try:
-        # Önce Streamlit Cloud kasasına (secrets) bakmayı dener (Bulut için)
-        creds_dict = json.loads(st.secrets["google_json"])
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    except (FileNotFoundError, KeyError):
-        # Eğer bulamazsa, senin bilgisayarındaki dosyaya bakar (Lokal için)
-        creds = Credentials.from_service_account_file('google_credentials.json', scopes=scopes)
-        
-    return gspread.authorize(creds)
-def veriyi_cek(tc_no):
+        # 1. Önce senin bilgisayarındaki o tam yoldan okumayı dener
+        creds = Credentials.from_service_account_file(json_path, scopes=scopes)
+        return gspread.authorize(creds)
+    except Exception as e_local:
+        # 2. Eğer dosyayı bulamazsa veya bulutta çalışıyorsak, Streamlit Secrets kasasına bakar
+        try:
+            creds_dict = json.loads(st.secrets["google_json"])
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            return gspread.authorize(creds)
+        except Exception as e_cloud:
+            # 3. İkisi de başarısız olursa ekrana tam olarak nerelere baktığını yazdırır!
+            st.error(f"🛑 GİZLİ ANAHTAR BULUNAMADI!")
+            st.write(f"**Lokalde aradığım tam yol:** `{json_path}`")
+            st.write(f"**Lokal Hata:** `{e_local}`")
+            raise Exception("Kimlik doğrulama dosyası bulunamadığı için işlem durduruldu.")def veriyi_cek(tc_no):
     """Buluttan TC ile hasta arar, bulursa ekrana çeker"""
     if not tc_no: return False
     try:
