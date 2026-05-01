@@ -44,10 +44,18 @@ if 'current_step' not in st.session_state:
 
 # --- GOOGLE SHEETS FONKSİYONLARI ---
 @st.cache_resource
+def import json # Bunu sayfanın en üstündeki importların arasına eklemiş olduğundan emin ol
+
+@st.cache_resource
 def get_gsheet_client():
-    """Google Sheets API'ye güvenli bağlantı sağlar"""
+    """Google Sheets API'ye Streamlit Secrets üzerinden güvenli bağlantı sağlar"""
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+    
+    # Şifreyi dosyadan değil, Streamlit'in güvenli kasasından çekiyoruz
+    creds_dict = json.loads(st.secrets["google_json"])
+    
+    # from_service_account_file YERİNE from_service_account_info kullanıyoruz
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     return gspread.authorize(creds)
 
 def veriyi_cek(tc_no):
